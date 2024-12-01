@@ -1,0 +1,14 @@
+# python
+__pycache__/
+# log
+lightning_logs/
+logs/
+# cache dir
+.cache
+.test
+.vscode
+# checkpoint
+checkpoints/
+*.ckpt
+*.pt
+*.pth
