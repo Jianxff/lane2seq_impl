@@ -5,9 +5,10 @@ from typing import Union, Optional, List, Dict, Tuple
 import argparse
 # lane2seq
 from model import Lane2Seq
-from llamas import LLAMASModule
+from llamas_dataset import LLAMASModule
 import lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import TensorBoardLogger
 
 
 def main(args):
@@ -23,12 +24,22 @@ def main(args):
     # logger
     logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS', log_graph=True)
 
+    # checkpoints
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='./checkpoints',
+        filename='model-llamas-{epoch:02d}-{val_loss:.2f}',
+        save_last=True,
+        monitor='val_loss',
+        mode='min'
+    )
+
     # trainer
     trainer = pl.Trainer(
         max_epochs=args.max_epochs,
         accelerator='gpu',
         devices=[0],
-        logger=logger
+        logger=logger,
+        callbacks=[checkpoint_callback]
     )
 
     # train

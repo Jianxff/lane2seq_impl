@@ -9,6 +9,7 @@ import lightning as pl
 import timm
 # objective
 from loss import WeightedCrossEntropyLoss
+from metric import f1_evaluate
 
 
 class Lane2Seq(pl.LightningModule):
@@ -63,7 +64,7 @@ class Lane2Seq(pl.LightningModule):
         self.mlp = nn.Sequential(*self.mlp_layer_list)
 
         # objective
-        self.objective = WeightedCrossEntropyLoss()
+        self.cross_entropy_loss = WeightedCrossEntropyLoss()
 
     
     def configure_optimizers(self):
@@ -80,6 +81,7 @@ class Lane2Seq(pl.LightningModule):
         self,
         img: torch.Tensor, # [b, c, 224, 224]
         seq: torch.Tensor, # [b, seq_len]
+        pad_mask: Optional[torch.Tensor] = None, # [b, seq_len]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # feature extraction
         feat = self.backbone.forward_features(img)       # [b, 197, 768]
@@ -87,7 +89,10 @@ class Lane2Seq(pl.LightningModule):
         # embedding
         emb = self.embedding(seq)       # [b, seq_len, hidden_size]
         # decode
-        out = self.decoder(tgt=emb, memory=mem)  # [b, seq_len, hidden_size]
+        seq_len = seq.size(-1)
+        tgt_mask = torch.triu(torch.ones(seq_len, seq_len) * (-1 * torch.inf), diagonal=1).to(seq.device)
+        out = self.decoder(tgt=emb, memory=mem,
+            tgt_mask=tgt_mask, tgt_key_padding_mask=pad_mask)  # [b, seq_len, hidden_size]
         # to likelihood
         out = self.mlp(out)                 # [b, seq_len, n_bins + 7]
         # out = torch.softmax(out, dim=-1)    # [b, seq_len, n_bins + 7]
@@ -99,12 +104,16 @@ class Lane2Seq(pl.LightningModule):
         batch: Tuple[torch.Tensor, torch.Tensor],
         batch_idx: int,
     ) -> torch.Tensor:
-        images, input_sequences, target_sequences = batch
+        images, input_sequences, target_sequences, padding_mask = batch
         # forward pass
-        predict_sequences = self.forward(images, input_sequences) # [b, seq_len, n_bins + 7]
+        out = self.forward(img=images, seq=input_sequences, pad_mask=padding_mask) # [b, seq_len, n_bins + 7]
         # compute loss
-        loss = self.objective(predict_sequences, target_sequences)
+        loss = self.cross_entropy_loss(out, target_sequences)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # # evaluation metric
+        # predict_sequences = self.likelihood_to_quantized_points(out)
+        # metirc = f1_evaluate(predict_sequences, target_sequences)
+        # self.log('F1', metirc['f1'], on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
 
@@ -113,12 +122,19 @@ class Lane2Seq(pl.LightningModule):
         batch: Tuple[torch.Tensor, torch.Tensor],
         batch_idx: int,
     ) -> torch.Tensor:
-        images, input_sequences, target_sequences = batch
+        images, input_sequences, target_sequences, padding_mask = batch
         # forward pass
-        predict_sequences = self.forward(images, input_sequences)
+        out = self.forward(img=images, seq=input_sequences, pad_mask=padding_mask)
         # compute loss
-        loss = self.objective(predict_sequences, target_sequences)
+        loss = self.cross_entropy_loss(out, target_sequences)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # compute evaluation metric
+        predict_sequences = self.likelihood_to_quantized_points(out)
+        metirc = f1_evaluate(predict_sequences, target_sequences)
+        self.log('F1', metirc['f1'], on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('FP', metirc['fp'], on_step=True, on_epoch=True, logger=True)
+        self.log('FN', metirc['fn'], on_step=True, on_epoch=True, logger=True)
+        self.log('Acc', metirc['precision'], on_step=True, on_epoch=True, logger=True)
 
 
     def test_step(

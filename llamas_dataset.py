@@ -9,6 +9,17 @@ import torch
 from torch.utils.data import Dataset
 import lightning as pl
 from torch.utils.data import random_split
+# utils
+from llamas_utils import llamas_sample_points_horizontal
+
+
+TOKEN_PAD = 0
+TOKEN_START = 1001
+TOKEN_END = 1002
+TOKEN_LANE = 1003
+TOKEN_SEGMENT = 1004
+TOKEN_ANCHOR = 1005
+TOKEN_PARAM = 1006
 
 
 class LLAMAS(Dataset):
@@ -25,20 +36,14 @@ class LLAMAS(Dataset):
 
         self.data_dir = self.root / split
         self.images = self.glob_file_recursive(self.data_dir, '.png')
-        
+        self.images = sorted(list(self.images))
+
         if split in ['train', 'val']:
             self.data_label_dir = self.root / 'labels' / split
             self.labels = self.glob_file_recursive(self.data_label_dir, '.json')
+            self.labels = sorted(list(self.labels))
             
             assert len(self.images) == len(self.labels), 'number of images and labels must be the same'
-
-        self.TOKEN_PAD = 0
-        self.TOKEN_START = 1001
-        self.TOKEN_END = 1002
-        self.TOKEN_LANE = 1003
-        self.TOKEN_SEGMENT = 1004
-        self.TOKEN_ANCHOR = 1005
-        self.TOKEN_PARAM = 1006
 
 
     def __len__(self):
@@ -69,22 +74,24 @@ class LLAMAS(Dataset):
         # load label
         format_specific_sequence = []
         lanes_markers = self.load_json(self.labels[idx], (H, W))
-        for markers in lanes_markers:
-            markers = np.array(markers).flatten().tolist() # [x1, y1, x2, y2, ...], 14 points
+        for i, markers in enumerate(lanes_markers):
+            markers:list = np.array(markers).flatten().tolist() # [x1, y1, x2, y2, ...], 14 points
+            # if i == 0: 
+            #     markers.insert(0, 0); markers.insert(0, 0)
             markers = self.quantize_points(markers, (H, W))     # quantize points to [1, 1000]
-            markers.append(self.TOKEN_LANE)
+            markers.append(TOKEN_LANE)
             format_specific_sequence.extend(markers)
-        format_specific_sequence.insert(0, self.TOKEN_ANCHOR)
+        format_specific_sequence.insert(0, TOKEN_ANCHOR)
         
         # input sequence
-        input_sequence = [self.TOKEN_START]
+        input_sequence = [TOKEN_START]
         input_sequence.extend(format_specific_sequence)
         input_sequence = np.array(input_sequence).flatten()
         input_sequence = torch.from_numpy(input_sequence).type(torch.int64)
 
         # target sequence
         target_sequence = format_specific_sequence.copy()
-        target_sequence.append(self.TOKEN_END)
+        target_sequence.append(TOKEN_END)
         target_sequence = np.array(target_sequence).flatten()
         target_sequence = torch.from_numpy(target_sequence).type(torch.int64)
 
@@ -163,82 +170,6 @@ class LLAMAS(Dataset):
                 lanes.append(points)
 
         return lanes
-    
-
-def llamas_sample_points_horizontal(lane):
-    """ Markers are given by start and endpoint. This one adds extra points
-    which need to be considered for the interpolation. Otherwise the spline
-    could arbitrarily oscillate between start and end of the individual markers
-    Parameters
-    ----------
-    lane: polyline, in theory but there are artifacts which lead to inconsistencies
-            in ordering. There may be parallel lines. The lines may be dashed. It's messy.
-    ypp: y-pixels per point, e.g. 10 leads to a point every ten pixels
-    between_markers : bool, interpolates inbetween dashes
-    Notes
-    -----
-    Especially, adding points in the lower parts of the image (high y-values) because
-    the start and end points are too sparse.
-    Removing upper lane markers that have starting and end points mapped into the same pixel.
-    """
-
-    # Collect all x values from all markers along a given line. There may be multiple
-    # intersecting markers, i.e., multiple entries for some y values
-    x_values = [[] for i in range(717)]
-    for marker in lane['markers']:
-        marker['pixel_start']['x'] = int(marker['pixel_start']['x'])
-        marker['pixel_start']['y'] = int(marker['pixel_start']['y'])
-        marker['pixel_end']['x'] = int(marker['pixel_end']['x'])
-        marker['pixel_end']['y'] = int(marker['pixel_end']['y'])
-
-        x_values[marker['pixel_start']['y']].append(
-            marker['pixel_start']['x'])
-
-        height = marker['pixel_start']['y'] - marker['pixel_end']['y']
-        if height > 2:
-            slope = (marker['pixel_end']['x'] -
-                        marker['pixel_start']['x']) / height
-            step_size = (marker['pixel_start']['y'] -
-                            marker['pixel_end']['y']) / float(height)
-            for i in range(height + 1):
-                x = marker['pixel_start']['x'] + slope * step_size * i
-                y = marker['pixel_start']['y'] - step_size * i
-                x_values[int(round(y))].append(int(round(x)))
-
-    # Calculate average x values for each y value
-    for y, xs in enumerate(x_values):
-        if not xs:
-            x_values[y] = -1
-        else:
-            x_values[y] = sum(xs) / float(len(xs))
-
-    # # interpolate between markers
-    current_y = 0
-    while x_values[current_y] == -1:  # skip missing first entries
-        current_y += 1
-
-    # Also possible using numpy.interp when accounting for beginning and end
-    next_set_y = 0
-    try:
-        while current_y < 717:
-            if x_values[current_y] != -1:  # set. Nothing to be done
-                current_y += 1
-                continue
-
-            # Finds target x value for interpolation
-            while next_set_y <= current_y or x_values[next_set_y] == -1:
-                next_set_y += 1
-                if next_set_y >= 717:
-                    raise StopIteration
-
-            x_values[current_y] = x_values[current_y - 1] + (x_values[next_set_y] - x_values[current_y - 1]) /\
-                (next_set_y - current_y + 1)
-            current_y += 1
-
-    except StopIteration:
-        pass  # Done with lane
-
-    return x_values
 
 
 def collate_fn(batch: torch.Tensor):
@@ -257,17 +188,20 @@ def collate_fn(batch: torch.Tensor):
     max_input_size = max([len(input) for input in inputs])
     max_target_size = max([len(target) for target in targets])
 
+    # mask
+    input_padding_mask = torch.zeros(len(inputs), max_input_size, dtype=torch.bool).to(device)
     # pad input and target sequence
     for i in range(len(inputs)):
         inputs[i] = torch.cat([inputs[i], 
                 torch.zeros(max_input_size - len(inputs[i]),dtype=torch.int64).to(device)])
+        input_padding_mask[i, len(inputs[i]):] = True
         targets[i] = torch.cat([targets[i],
                 torch.zeros(max_target_size - len(targets[i]), dtype=torch.int64).to(device)])
     
     images = torch.stack(images)
     inputs = torch.stack(inputs)
     targets = torch.stack(targets)
-    return images, inputs, targets
+    return images, inputs, targets, input_padding_mask
 
 
 
@@ -320,8 +254,7 @@ class LLAMASModule(pl.LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=4,
-            collate_fn=collate_fn,
+            num_workers=4
         )
 
 
