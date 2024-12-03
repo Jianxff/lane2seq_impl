@@ -10,16 +10,9 @@ from torch.utils.data import Dataset
 import lightning as pl
 from torch.utils.data import random_split
 # utils
-from llamas_utils import llamas_sample_points_horizontal
-
-
-TOKEN_PAD = 0
-TOKEN_START = 1001
-TOKEN_END = 1002
-TOKEN_LANE = 1003
-TOKEN_SEGMENT = 1004
-TOKEN_ANCHOR = 1005
-TOKEN_PARAM = 1006
+from utils.llamas_utils import llamas_sample_points_horizontal, llamas_extend_lane
+from utils.visualize import vis_lane_circle, vis_lane_line
+from .const import *
 
 
 class LLAMAS(Dataset):
@@ -57,7 +50,7 @@ class LLAMAS(Dataset):
         Returns:
             Tuple[np.ndarary, List[List[int]]]: image tensor and label strings
         Note:
-            image: [H, W, 3]
+            image: [3, H, W]
             label: List[List[int]] (list of lanes)
         """
         # load image
@@ -162,6 +155,8 @@ class LLAMAS(Dataset):
         
         lanes = []
         for lane in json_data_raw['lanes']:
+            lane = self.convert_str_single_lane(lane)
+            lane = llamas_extend_lane(lane)
             x_points = llamas_sample_points_horizontal(lane)
             points = [(x, y) for x, y in zip(x_points, range(H)) if x >= 0]
             if len(points) >= 14:
@@ -171,6 +166,18 @@ class LLAMAS(Dataset):
 
         return lanes
 
+    @staticmethod
+    def convert_str_single_lane(lane):
+        keys_to_float = ['world_start', 'world_end']
+        keys_to_int = ['pixel_start', 'pixel_end']
+        for marker in lane['markers']:
+            for key in keys_to_float:
+                if key in marker:
+                    marker[key] = {k: float(v) for k, v in marker[key].items()}
+            for key in keys_to_int:
+                if key in marker:
+                    marker[key] = {k: int(v) for k, v in marker[key].items()}
+        return lane
 
 def collate_fn(batch: torch.Tensor):
     """
@@ -225,6 +232,8 @@ class LLAMASModule(pl.LightningDataModule):
             n = len(self.train_dataset)
             n_train = int(n * 0.9)
             n_val = n - n_train
+            # manual seed to ensure the same split
+            torch.manual_seed(42)
             self.train_dataset, self.val_dataset = random_split(self.train_dataset, [n_train, n_val])
             
         elif stage == 'test':
@@ -261,4 +270,6 @@ class LLAMASModule(pl.LightningDataModule):
 if __name__ == '__main__':
     dataset = LLAMAS('/data/datasets/LLAMAS', 'train')
     print(len(dataset))
-    print(dataset[0])
+    image, input_sequence, target_sequence = dataset[0]
+    img = vis_lane_line(image, target_sequence)
+    cv2.imwrite('test.png', img)

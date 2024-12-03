@@ -3,6 +3,96 @@ from scipy.optimize import linear_sum_assignment
 import numpy as np
 import cv2
 
+DCOLORS = [(110, 30, 30), (75, 25, 230), (75, 180, 60), (200, 130, 0), (48, 130, 245), (180, 30, 145),
+           (0, 0, 255), (24, 140, 34), (255, 0, 0), (0, 255, 255),  # the main ones
+           (40, 110, 170), (200, 250, 255), (255, 190, 230), (0, 0, 128), (195, 255, 170),
+           (0, 128, 128), (195, 255, 170), (75, 25, 230)]
+
+def get_dcolors(total_length):
+    center = 8
+    dr = (total_length - 1) // 2
+    dl = (total_length - 1) - dr
+    colors = DCOLORS[center - dl:center + dr + 1]
+    return colors
+
+
+def llamas_extend_lane(lane):
+    """Extends marker closest to the camera
+    Adds an extra marker that reaches the end of the image
+    Parameters
+    ----------
+    lane : iterable of markers
+    """
+    # Unfortunately, we did not store markers beyond the image plane. That hurts us now
+    # z is the orthongal distance to the car. It's good enough
+
+    # The markers are automatically detected, mapped, and labeled. There exist faulty ones,
+    # e.g., horizontal markers which need to be filtered
+    filtered_markers = filter(
+        lambda x: (x['pixel_start']['y'] != x['pixel_end']['y'] and x[
+            'pixel_start']['x'] != x['pixel_end']['x']), lane['markers'])
+    # might be the first marker in the list but not guaranteed
+    closest_marker = min(filtered_markers, key=lambda x: x['world_start']['z'])
+
+    if closest_marker['world_start'][
+            'z'] < 0:  # This one likely equals "if False"
+        return lane
+
+    # World marker extension approximation
+    x_gradient = (closest_marker['world_end']['x'] - closest_marker['world_start']['x']) /\
+        (closest_marker['world_end']['z'] - closest_marker['world_start']['z'])
+    y_gradient = (closest_marker['world_end']['y'] - closest_marker['world_start']['y']) /\
+        (closest_marker['world_end']['z'] - closest_marker['world_start']['z'])
+
+    zero_x = closest_marker['world_start']['x'] - (
+        closest_marker['world_start']['z'] - 1) * x_gradient
+    zero_y = closest_marker['world_start']['y'] - (
+        closest_marker['world_start']['z'] - 1) * y_gradient
+
+    # Pixel marker extension approximation
+    pixel_x_gradient = (closest_marker['pixel_end']['x'] - closest_marker['pixel_start']['x']) /\
+        (closest_marker['pixel_end']['y'] - closest_marker['pixel_start']['y'])
+    pixel_y_gradient = (closest_marker['pixel_end']['y'] - closest_marker['pixel_start']['y']) /\
+        (closest_marker['pixel_end']['x'] - closest_marker['pixel_start']['x'])
+
+    pixel_zero_x = closest_marker['pixel_start']['x'] + (
+        716 - closest_marker['pixel_start']['y']) * pixel_x_gradient
+    if pixel_zero_x < 0:
+        left_y = closest_marker['pixel_start'][
+            'y'] - closest_marker['pixel_start']['x'] * pixel_y_gradient
+        new_pixel_point = (0, left_y)
+    elif pixel_zero_x > 1276:
+        right_y = closest_marker['pixel_start']['y'] + (
+            1276 - closest_marker['pixel_start']['x']) * pixel_y_gradient
+        new_pixel_point = (1276, right_y)
+    else:
+        new_pixel_point = (pixel_zero_x, 716)
+
+    new_marker = {
+        'lane_marker_id': 'FAKE',
+        'world_end': {
+            'x': closest_marker['world_start']['x'],
+            'y': closest_marker['world_start']['y'],
+            'z': closest_marker['world_start']['z']
+        },
+        'world_start': {
+            'x': zero_x,
+            'y': zero_y,
+            'z': 1
+        },
+        'pixel_end': {
+            'x': closest_marker['pixel_start']['x'],
+            'y': closest_marker['pixel_start']['y']
+        },
+        'pixel_start': {
+            'x': int(round(new_pixel_point[0])),
+            'y': int(round(new_pixel_point[1]))
+        }
+    }
+    lane['markers'].insert(0, new_marker)
+
+    return lane
+
 
 def llamas_sample_points_horizontal(lane):
     """ Markers are given by start and endpoint. This one adds extra points
@@ -25,11 +115,6 @@ def llamas_sample_points_horizontal(lane):
     # intersecting markers, i.e., multiple entries for some y values
     x_values = [[] for i in range(717)]
     for marker in lane['markers']:
-        marker['pixel_start']['x'] = int(marker['pixel_start']['x'])
-        marker['pixel_start']['y'] = int(marker['pixel_start']['y'])
-        marker['pixel_end']['x'] = int(marker['pixel_end']['x'])
-        marker['pixel_end']['y'] = int(marker['pixel_end']['y'])
-
         x_values[marker['pixel_start']['y']].append(
             marker['pixel_start']['x'])
 

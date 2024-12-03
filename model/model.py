@@ -8,8 +8,8 @@ import torch.nn as nn
 import lightning as pl
 import timm
 # objective
-from loss import WeightedCrossEntropyLoss
-from metric import f1_evaluate
+from .loss import WeightedCrossEntropyLoss
+from utils.metric import f1_evaluate
 
 
 class Lane2Seq(pl.LightningModule):

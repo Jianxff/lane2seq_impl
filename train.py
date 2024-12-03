@@ -4,8 +4,8 @@ from typing import Union, Optional, List, Dict, Tuple
 # third party
 import argparse
 # lane2seq
-from model import Lane2Seq
-from llamas_dataset import LLAMASModule
+from model.model import Lane2Seq
+from dataset.llamas import LLAMASModule
 import lightning as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -28,6 +28,7 @@ def main(args):
     checkpoint_callback = ModelCheckpoint(
         dirpath='./checkpoints',
         filename='model-llamas-{epoch:02d}-{val_loss:.2f}',
+        save_top_k=-1,
         save_last=True,
         monitor='val_loss',
         mode='min'
@@ -43,13 +44,15 @@ def main(args):
     )
 
     # train
-    trainer.fit(model=model, datamodule=data_module)
+    ckpt_path = './checkpoints/last.ckpt' if args.resume else None
+    trainer.fit(model=model, datamodule=data_module, ckpt_path=ckpt_path)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--llamas_root', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--max_epochs', type=int, default=15)
+    parser.add_argument('--max_epochs', type=int, default=30)
+    parser.add_argument('--resume', action='store_true', default=False)
     args = parser.parse_args()
     main(args)

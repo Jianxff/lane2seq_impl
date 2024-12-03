@@ -5,10 +5,9 @@ from typing import Union, Optional, List, Dict, Tuple
 import cv2
 import torch
 import numpy as np
-
-from llamas_dataset import TOKEN_START, TOKEN_ANCHOR, TOKEN_LANE, TOKEN_END, TOKEN_PAD
 # utils
-from llamas_utils import interpolate_lane, culane_metric, remove_consecutive_duplicates
+from utils.llamas_utils import interpolate_lane, culane_metric, remove_consecutive_duplicates
+from dataset.const import *
 
 
 def dequantize_point(x: int, bins: int = 1000) -> float:
