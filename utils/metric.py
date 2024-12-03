@@ -6,7 +6,7 @@ import cv2
 import torch
 import numpy as np
 # utils
-from utils.llamas_utils import interpolate_lane, culane_metric, remove_consecutive_duplicates
+from .llamas_utils import interpolate_lane, culane_metric, remove_consecutive_duplicates
 from dataset.const import *
 
 

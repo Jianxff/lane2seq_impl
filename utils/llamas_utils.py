@@ -31,6 +31,9 @@ def llamas_extend_lane(lane):
     filtered_markers = filter(
         lambda x: (x['pixel_start']['y'] != x['pixel_end']['y'] and x[
             'pixel_start']['x'] != x['pixel_end']['x']), lane['markers'])
+    filtered_markers = list(filtered_markers)
+    if len(filtered_markers) == 0:
+        return lane
     # might be the first marker in the list but not guaranteed
     closest_marker = min(filtered_markers, key=lambda x: x['world_start']['z'])
 

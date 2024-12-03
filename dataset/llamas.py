@@ -271,5 +271,5 @@ if __name__ == '__main__':
     dataset = LLAMAS('/data/datasets/LLAMAS', 'train')
     print(len(dataset))
     image, input_sequence, target_sequence = dataset[0]
-    img = vis_lane_line(image, target_sequence)
-    cv2.imwrite('test.png', img)
+    # img = vis_lane_line(image, target_sequence)
+    # cv2.imwrite('test.png', img)

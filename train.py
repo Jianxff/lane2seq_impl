@@ -27,7 +27,7 @@ def main(args):
     # checkpoints
     checkpoint_callback = ModelCheckpoint(
         dirpath='./checkpoints',
-        filename='model-llamas-{epoch:02d}-{val_loss:.2f}',
+        filename='model-llamas-{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}',
         save_top_k=-1,
         save_last=True,
         monitor='val_loss',
