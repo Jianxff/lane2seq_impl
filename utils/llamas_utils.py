@@ -223,7 +223,7 @@ def culane_metric(pred,
         tp = 0
         fp = 0 if len(anno) != 0 else len(pred)
         fn = 0 if len(pred) != 0 else len(anno)
-        _metric[thr] = [tp, fp, fn]
+        _metric[thr] = [tp, fp, fn, []]
     
     if len(pred) == 0 or len(anno) == 0:
         return _metric
@@ -235,9 +235,12 @@ def culane_metric(pred,
     row_ind, col_ind = linear_sum_assignment(1 - ious)
     _metric = {}
     for thr in iou_thresholds:
-        tp = int((ious[row_ind, col_ind] > thr).sum())
+        # tp = int((ious[row_ind, col_ind] > thr).sum())
+        thr_index = np.where(ious[row_ind, col_ind] > thr)
+        tp = len(thr_index[0])
+        tp_index = (row_ind[thr_index], col_ind[thr_index])
         fp = len(pred) - tp
         fn = len(anno) - tp
-        _metric[thr] = [tp, fp, fn]
+        _metric[thr] = [tp, fp, fn, tp_index]
 
     return _metric

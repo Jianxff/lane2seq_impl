@@ -72,6 +72,7 @@ def evaluate_single_batch(
     # [tp, fp, fn]
     return metric
 
+
 def f1_evaluate(
     x: torch.Tensor,    # [b, seq]
     gt: torch.Tensor,   # [b, seq]

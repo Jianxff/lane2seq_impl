@@ -126,7 +126,7 @@ class Lane2Seq(pl.LightningModule):
             out = self.forward_decoder(seq=seq, mem=mem) # [b, seq, n_bins + 7]
             # next token
             next_token_logit = out[:, -1]   # [b, n_bins + 7]
-            next_token = self.to_index(next_token_logit).unsqueeze(-1)  # [b, 1]
+            next_token = self.filter_argmax(next_token_logit).unsqueeze(-1)  # [b, 1]
             seq = torch.cat([seq, next_token], dim=-1)      
             # check end if batch_size is one  
             if batch_size == 1:
@@ -136,7 +136,7 @@ class Lane2Seq(pl.LightningModule):
     
 
     @staticmethod
-    def to_index(x: torch.Tensor) -> torch.Tensor: # [b, seq_len, n_bins + 7] -> [b, seq_len]
+    def filter_argmax(x: torch.Tensor) -> torch.Tensor: # [b, seq_len, n_bins + 7] -> [b, seq_len]
         """
         Convert likelihood to quantized points.
         Args:
@@ -166,10 +166,9 @@ class Lane2Seq(pl.LightningModule):
         mem = self.forward_encoder(images) # [b, patch_num, hidden_size]
         out = self.forward_decoder(seq=input_sequences, mem=mem, pad_mask=padding_mask) # [b, seq_len, n_bins + 7]
         
-        # compute loss
+        # training loss 
         loss = self.cross_entropy_loss(out, target_sequences)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        
         return loss
 
 
@@ -188,11 +187,9 @@ class Lane2Seq(pl.LightningModule):
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
         # compute evaluation metric
-        predict_sequences = self.to_index(out)
+        predict_sequences = self.filter_argmax(out)
         metirc = f1_evaluate(predict_sequences, target_sequences)
         self.log('F1', metirc['f1'], on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('FP', metirc['fp'], on_step=True, on_epoch=True, logger=True)
-        self.log('FN', metirc['fn'], on_step=True, on_epoch=True, logger=True)
         self.log('Acc', metirc['precision'], on_step=True, on_epoch=True, logger=True)
 
 
@@ -209,6 +206,4 @@ class Lane2Seq(pl.LightningModule):
         # compute evaluation metric
         metirc = f1_evaluate(predict_sequences, target_sequences)
         self.log('F1', metirc['f1'], on_step=True, prog_bar=True, logger=True)
-        self.log('FP', metirc['fp'], on_step=True, logger=True)
-        self.log('FN', metirc['fn'], on_step=True, logger=True)
         self.log('Acc', metirc['precision'], on_step=True, logger=True)

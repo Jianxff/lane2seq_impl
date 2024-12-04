@@ -22,11 +22,11 @@ def main(args):
     model = Lane2Seq().to('cuda')
 
     # logger
-    logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS', log_graph=True)
+    logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS-Train', log_graph=True)
 
     # checkpoints
     checkpoint_callback = ModelCheckpoint(
-        dirpath='./checkpoints',
+        dirpath='./checkpoints/train',
         filename='model-llamas-{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}',
         save_top_k=-1,
         save_last=True,
@@ -44,7 +44,7 @@ def main(args):
     )
 
     # train
-    ckpt_path = './checkpoints/last.ckpt' if args.resume else None
+    ckpt_path = './checkpoints/train/last.ckpt' if args.resume else None
     trainer.fit(model=model, datamodule=data_module, ckpt_path=ckpt_path)
 
 
@@ -52,7 +52,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--llamas_root', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--max_epochs', type=int, default=30)
+    parser.add_argument('--max_epochs', type=int, default=50)
     parser.add_argument('--resume', action='store_true', default=False)
     args = parser.parse_args()
     main(args)

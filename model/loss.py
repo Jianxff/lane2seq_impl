@@ -8,7 +8,7 @@ import torch.nn as nn
 
 
 class WeightedCrossEntropyLoss(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, reduction = 'mean') -> None:
         super(WeightedCrossEntropyLoss, self).__init__()
         # weight for cross entropy loss
         weight = torch.ones(1000 + 7)
@@ -20,6 +20,7 @@ class WeightedCrossEntropyLoss(nn.Module):
         self.loss = nn.CrossEntropyLoss(
             weight=weight,
             ignore_index=0,
+            reduction=reduction,
         )
 
     def forward(
