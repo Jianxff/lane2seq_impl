@@ -14,7 +14,10 @@ def dequantize_point(x: int, bins: int = 1000) -> float:
     return (x - 1) / (bins - 1)
 
 
-def parse_single_lane_sequence(x: torch.Tensor, img_size: Tuple[int, int]) -> List[List[Tuple[float, float]]]:
+def parse_single_lane_sequence(
+    x: Union[List[int], torch.Tensor], 
+    img_size: Tuple[int, int]
+) -> List[List[Tuple[float, float]]]:
     """
     Parse a single lane sequence.
     Args:
@@ -22,7 +25,8 @@ def parse_single_lane_sequence(x: torch.Tensor, img_size: Tuple[int, int]) -> Li
     Returns:
         List[List[Tuple[float, float]]]: [[(x, y)]]
     """
-    x = x.detach().cpu().tolist()
+    if isinstance(x, torch.Tensor):
+        x = x.detach().cpu().tolist()
     H, W = img_size
     # parse lanes
     lanes = []
@@ -30,7 +34,6 @@ def parse_single_lane_sequence(x: torch.Tensor, img_size: Tuple[int, int]) -> Li
     for _, token in enumerate(x):
         if token == TOKEN_END: break
         if token in [TOKEN_START, TOKEN_ANCHOR, TOKEN_PAD]: continue
-        
         if token == TOKEN_LANE:
             lanes.append(new_lane.copy())
             new_lane.clear()

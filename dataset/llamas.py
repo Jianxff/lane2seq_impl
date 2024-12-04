@@ -31,7 +31,7 @@ class LLAMAS(Dataset):
         self.images = self.glob_file_recursive(self.data_dir, '.png')
         self.images = sorted(list(self.images))
 
-        if split in ['train', 'val']:
+        if split in ['train', 'valid']:
             self.data_label_dir = self.root / 'labels' / split
             self.labels = self.glob_file_recursive(self.data_label_dir, '.json')
             self.labels = sorted(list(self.labels))
@@ -236,8 +236,8 @@ class LLAMASModule(pl.LightningDataModule):
             torch.manual_seed(42)
             self.train_dataset, self.val_dataset = random_split(self.train_dataset, [n_train, n_val])
             
-        elif stage == 'test':
-            self.test_dataset = LLAMAS(root=self.root, split='val')
+        elif stage == 'test' or stage == 'predict':
+            self.test_dataset = LLAMAS(root=self.root, split='valid')
         
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:
@@ -265,11 +265,20 @@ class LLAMASModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=4
         )
+    
+    def predict_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.test_dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=4
+        )
 
 
 if __name__ == '__main__':
-    dataset = LLAMAS('/data/datasets/LLAMAS', 'train')
+    dataset = LLAMAS('/data/datasets/LLAMAS', 'valid')
     print(len(dataset))
-    image, input_sequence, target_sequence = dataset[0]
-    # img = vis_lane_line(image, target_sequence)
-    # cv2.imwrite('test.png', img)
+    print(dataset.images[150])
+    image, input_sequence, target_sequence = dataset[150]
+    img = vis_lane_line(image, target_sequence)
+    cv2.imwrite('test.png', img)

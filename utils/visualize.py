@@ -36,7 +36,7 @@ def vis_lane_circle(
 
 def vis_lane_line(
     image: Union[np.ndarray, torch.Tensor],
-    lane: torch.Tensor,
+    lane: Union[List[int], torch.Tensor],
 ) -> np.ndarray:
     if isinstance(image, torch.Tensor):
         image = image_torch_to_numpy(image)

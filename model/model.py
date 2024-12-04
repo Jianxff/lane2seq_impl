@@ -10,6 +10,7 @@ import timm
 # objective
 from .loss import WeightedCrossEntropyLoss
 from utils.metric import f1_evaluate
+from dataset.const import TOKEN_END, TOKEN_START, TOKEN_ANCHOR
 
 
 class Lane2Seq(pl.LightningModule):
@@ -82,7 +83,7 @@ class Lane2Seq(pl.LightningModule):
         img: torch.Tensor, # [b, c, 224, 224]
         seq: torch.Tensor, # [b, seq_len]
         pad_mask: Optional[torch.Tensor] = None, # [b, seq_len]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         # feature extraction
         feat = self.backbone.forward_features(img)       # [b, 197, 768]
         mem = self.bottleneck(feat)     # [b, patch_num, hidden_size]
@@ -95,8 +96,76 @@ class Lane2Seq(pl.LightningModule):
             tgt_mask=tgt_mask, tgt_key_padding_mask=pad_mask)  # [b, seq_len, hidden_size]
         # to likelihood
         out = self.mlp(out)                 # [b, seq_len, n_bins + 7]
-        # out = torch.softmax(out, dim=-1)    # [b, seq_len, n_bins + 7]
         return out
+    
+
+    @torch.no_grad()
+    def batch_predict(
+        self,
+        img: torch.Tensor, # [b, 3, 224, 224]
+        max_seq_len: Optional[int] = (2 + 16 * (14 * 2 + 1)), # <anchor> 16 lanes <end>
+    ) -> torch.Tensor:
+        # variable
+        batch_size = img.size(0)
+        device = img.device
+
+        # feature extraction
+        feat = self.backbone.forward_features(img)
+        mem = self.bottleneck(feat)     # [b, patch_num, hidden_size]
+
+        # initial seq [b, 2] (<start>, <anchor>)
+        seq = torch.tensor([[TOKEN_START, TOKEN_ANCHOR]]).repeat(batch_size, 1).to(device)
+        # full prediction
+        for _ in range(max_seq_len - 2):
+            # embedding
+            emb = self.embedding(seq)
+            # decode
+            seq_len = seq.size(-1)
+            tgt_mask = torch.triu(torch.ones(seq_len, seq_len) * (-1 * torch.inf), diagonal=1).to(device)
+            out = self.decoder(tgt=emb, memory=mem, tgt_mask=tgt_mask)  # [b, seq, hidden_size]
+            out = self.mlp(out)                 # [b, seq, n_bins + 7]
+            # next token
+            next_token_logit = out[:, -1]   # [b, n_bins + 7]
+            next_token = self.to_index(next_token_logit).unsqueeze(-1)  # [b, 1]
+            seq = torch.cat([seq, next_token], dim=-1)        
+        
+        return seq
+
+
+    @torch.no_grad()
+    def predict(
+        self,
+        img: torch.Tensor, # [3, 224, 224]
+        max_seq_len: Optional[int] = (2 + 16 * (14 * 2 + 1)), # <anchor> 16 lanes <end>
+    ) -> torch.Tensor:
+        # dim check
+        if len(img.shape) == 3:
+            img = img.unsqueeze(0)
+        device = img.device
+        # feature extraction
+        feat = self.backbone.forward_features(img)       # [1, 197, 768]
+        mem = self.bottleneck(feat)     # [1, patch_num, hidden_size]
+
+        # start seq [1, 2] (<start>, <anchor>) 
+        seq = torch.tensor([[TOKEN_START, TOKEN_ANCHOR]]).to(device)
+        # auto-regressive prediction
+        while len(seq) < max_seq_len:
+            # embedding
+            emb = self.embedding(seq)    # [1, seq, hidden_size]
+            # decode
+            seq_len = seq.size(-1)
+            tgt_mask = torch.triu(torch.ones(seq_len, seq_len) * (-1 * torch.inf), diagonal=1).to(device)
+            out = self.decoder(tgt=emb, memory=mem, tgt_mask=tgt_mask)  # [1, seq, hidden_size]
+            out = self.mlp(out)                 # [1, seq, n_bins + 7]
+            # next token
+            next_token_logit = out[0, -1]   # [n_bins + 7]
+            next_token = self.to_index(next_token_logit)
+            seq = torch.cat([seq, next_token.unsqueeze(0).unsqueeze(0)], dim=-1)
+            # check end
+            if next_token.item() == TOKEN_END:
+                break
+    
+        return seq.squeeze(0)
 
 
     def training_step(
@@ -110,10 +179,7 @@ class Lane2Seq(pl.LightningModule):
         # compute loss
         loss = self.cross_entropy_loss(out, target_sequences)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        # # evaluation metric
-        # predict_sequences = self.likelihood_to_quantized_points(out)
-        # metirc = f1_evaluate(predict_sequences, target_sequences)
-        # self.log('F1', metirc['f1'], on_step=True, on_epoch=True, prog_bar=True)
+        
         return loss
 
 
@@ -129,7 +195,7 @@ class Lane2Seq(pl.LightningModule):
         loss = self.cross_entropy_loss(out, target_sequences)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         # compute evaluation metric
-        predict_sequences = self.likelihood_to_quantized_points(out)
+        predict_sequences = self.to_index(out)
         metirc = f1_evaluate(predict_sequences, target_sequences)
         self.log('F1', metirc['f1'], on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('FP', metirc['fp'], on_step=True, on_epoch=True, logger=True)
@@ -142,33 +208,30 @@ class Lane2Seq(pl.LightningModule):
         batch: Tuple[torch.Tensor, torch.Tensor],
         batch_idx: int,
     ) -> torch.Tensor:
-        raise NotImplementedError("Test step is not implemented yet.")
+        images, _, target_sequences, _ = batch
+        # forward pass
+        out = self.batch_predict(img=images)
+        # compute evaluation metric
+        predict_sequences = self.to_index(out)
+        metirc = f1_evaluate(predict_sequences, target_sequences)
+        self.log('F1', metirc['f1'], on_step=True, prog_bar=True, logger=True)
+        self.log('FP', metirc['fp'], on_step=True, logger=True)
+        self.log('FN', metirc['fn'], on_step=True, logger=True)
+        self.log('Acc', metirc['precision'], on_step=True, logger=True)
+
 
 
     @staticmethod
-    def likelihood_to_quantized_points(
-        x: torch.Tensor, # [b, seq_len, n_bins + 7]
-    ) -> List[int]:
+    def to_index(x: torch.Tensor) -> torch.Tensor: # [b, seq_len, n_bins + 7] -> [b, seq_len]
         """
         Convert likelihood to quantized points.
         Args:
             out (torch.Tensor): likelihood [seq_len, n_bins + 7]
         Returns:
-            List[int]: quantized points
+            torch.Tensor: index [seq_len]
         """
         # softmax
         x = torch.softmax(x, dim=-1)    # [b, seq_len, n_bins + 7]
-        # get the most likely
+        # get index of the most likely
         x = torch.argmax(x, dim=-1)     # [b, seq_len]
         return x
-
-
-if __name__ == '__main__':
-    # test model
-    model = Lane2Seq()
-    # print(model)
-    # test data
-    img = torch.randn(2, 3, 224, 224)
-    seq = torch.randint(0, 1000, (2, 5))
-    out = model.forward(img, seq)
-    print(out.shape)  # [2, 5, 1003]
