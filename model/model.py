@@ -122,7 +122,7 @@ class Lane2Seq(pl.LightningModule):
     def predict(
         self,
         img: torch.Tensor, # [b, 3, 224, 224]
-        max_seq_len: Optional[int] = (2 + 16 * (14 * 2 + 1)), # <anchor> 16 lanes <end>
+        max_seq_len: Optional[int] = (16 * (14 * 2 + 1) + 1), # 16 lanes <end>
     ) -> torch.Tensor:
         # dim check
         if len(img.shape) == 3: img = img.unsqueeze(0)
