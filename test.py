@@ -7,7 +7,6 @@ import argparse
 from model.model import Lane2Seq
 from dataset.llamas import LLAMASModule
 import lightning as pl
-from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 
 
@@ -22,37 +21,23 @@ def main(args):
     model = Lane2Seq().to('cuda')
 
     # logger
-    logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS-Train', log_graph=True)
-
-    # checkpoints
-    checkpoint_callback = ModelCheckpoint(
-        dirpath='./checkpoints/train',
-        filename='weight-llamas-{epoch:02d}-{train_loss:.2f}-{val_loss:.2f}',
-        save_top_k=10,
-        save_last=True,
-        monitor='val_loss',
-        mode='min'
-    )
+    logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS-Test', log_graph=True)
 
     # trainer
     trainer = pl.Trainer(
-        max_epochs=args.max_epochs,
         accelerator='gpu',
         devices=[0],
         logger=logger,
-        callbacks=[checkpoint_callback]
     )
 
-    # train
-    ckpt_path = './checkpoints/train/last.ckpt' if args.resume else None
-    trainer.fit(model=model, datamodule=data_module, ckpt_path=ckpt_path)
+    # test
+    trainer.test(model=model, datamodule=data_module, ckpt_path=args.ckpt)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--llamas_root', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--max_epochs', type=int, default=30)
-    parser.add_argument('--resume', action='store_true', default=False)
+    parser.add_argument('--ckpt', type=str, default='./checkpoints/tune/last.ckpt')
     args = parser.parse_args()
     main(args)

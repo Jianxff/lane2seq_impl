@@ -8,6 +8,7 @@ import numpy as np
 # utils
 from .llamas_utils import interpolate_lane, culane_metric, remove_consecutive_duplicates
 from dataset.const import *
+from utils.batch_util import batch_fn
 
 
 def dequantize_point(x: int, bins: int = 1000) -> float:
@@ -27,13 +28,15 @@ def parse_single_lane_sequence(
     """
     if isinstance(x, torch.Tensor):
         x = x.detach().cpu().tolist()
+    if isinstance(x, np.ndarray):
+        x = x.tolist()
     H, W = img_size
     # parse lanes
     lanes = []
     new_lane = []
     for _, token in enumerate(x):
         if token == TOKEN_END: break
-        if token in [TOKEN_START, TOKEN_ANCHOR, TOKEN_PAD]: continue
+        if token in [TOKEN_START, TOKEN_PAD]: continue
         if token == TOKEN_LANE:
             lanes.append(new_lane.copy())
             new_lane.clear()
@@ -73,7 +76,7 @@ def evaluate_single_batch(
     return metric
 
 
-def f1_evaluate(
+def batch_evaluate(
     x: torch.Tensor,    # [b, seq]
     gt: torch.Tensor,   # [b, seq]
     img_size: Tuple[int, int] = (717, 1276)
@@ -86,10 +89,9 @@ def f1_evaluate(
     Returns:
         float: metric
     """
-    metrics = []
-    for b in range(x.size(0)):
-        metric = evaluate_single_batch(x[b], gt[b], img_size=img_size)
-        metrics.append(metric)
+    metrics = batch_fn(evaluate_single_batch, x.size(0), \
+                       x, gt, img_size=img_size)
+
 
     tp = sum([metric[0] for metric in metrics])
     fp = sum([metric[1] for metric in metrics])

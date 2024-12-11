@@ -12,7 +12,7 @@ from torch.utils.data import random_split
 # utils
 from utils.llamas_utils import llamas_sample_points_horizontal, llamas_extend_lane
 from utils.visualize import vis_lane_circle, vis_lane_line
-from .const import *
+from .const import TOKEN_START, TOKEN_END, TOKEN_LANE, TOKEN_PAD
 
 
 class LLAMAS(Dataset):
@@ -74,7 +74,7 @@ class LLAMAS(Dataset):
             markers = self.quantize_points(markers, (H, W))     # quantize points to [1, 1000]
             markers.append(TOKEN_LANE)
             format_specific_sequence.extend(markers)
-        format_specific_sequence.insert(0, TOKEN_ANCHOR)
+        # format_specific_sequence.insert(0, TOKEN_ANCHOR)
         
         # input sequence
         input_sequence = [TOKEN_START]
@@ -179,6 +179,7 @@ class LLAMAS(Dataset):
                     marker[key] = {k: int(v) for k, v in marker[key].items()}
         return lane
 
+
 def collate_fn(batch: torch.Tensor):
     """
     Collate function for DataLoader.
@@ -263,7 +264,8 @@ class LLAMASModule(pl.LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=4
+            num_workers=4,
+            collate_fn=collate_fn,
         )
     
     def predict_dataloader(self):
