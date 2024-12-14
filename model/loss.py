@@ -5,13 +5,13 @@ from typing import Union, Optional, List, Dict, Tuple
 import cv2
 import torch
 import torch.nn as nn
-from dataset.const import SIZE_SPECIAL_TOKENS
+from dataset.const import SPECIAL_CODE_NUM
 
 class CrossEntropy:
     def __init__(self, reduction = 'mean', device: str = 'cuda') -> None:
         super(CrossEntropy, self).__init__()
         # # weight for cross entropy loss
-        # weight = torch.ones(1000 + SIZE_SPECIAL_TOKENS)
+        # weight = torch.ones(1000 + SPECIAL_CODE_NUM)
         # # 0 for format transcription
         # weight[1004] = 0
         # weight[1005] = 0

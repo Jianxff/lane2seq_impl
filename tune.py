@@ -34,7 +34,7 @@ def main(args):
         save_top_k=10,
         save_last=True,
         monitor='val_f1',
-        mode='min'
+        mode='max'
     )
 
     # trainer
@@ -47,7 +47,7 @@ def main(args):
     )
 
     # train
-    ckpt_path = './checkpoints/tuning/last.ckpt' if args.resume else None
+    ckpt_path = './checkpoints/tune/last.ckpt' if args.resume else None
     trainer.fit(model=model, datamodule=data_module, ckpt_path=ckpt_path)
 
 

@@ -10,7 +10,7 @@ import timm
 # objective
 from .loss import CrossEntropy
 from utils.metric import batch_evaluate
-from dataset.const import TOKEN_END, TOKEN_START, TOKEN_PAD, SIZE_SPECIAL_TOKENS
+from dataset.const import END_CODE, START_CODE, PAD_CODE, SPECIAL_CODE_NUM
 # reinforcement learning
 from .reinforce import REINFORCE
 
@@ -28,7 +28,7 @@ class Lane2Seq(pl.LightningModule):
     ) -> None:
         super(Lane2Seq, self).__init__()
 
-        # ViT-Base backbone encoder [3, 24, 24] -> [b, 197, 768]
+        # ViT-Base backbone encoder [3, 224, 224] -> [b, 197, 768]
         self.backbone = timm.create_model(
             f'vit_base_patch16_224.mae', 
             pretrained=True,
@@ -54,9 +54,9 @@ class Lane2Seq(pl.LightningModule):
         # vocabulary embedding
         self.embedding = nn.Sequential(
             nn.Embedding(
-                num_embeddings=n_bins + SIZE_SPECIAL_TOKENS,      # 1000 + 3 (for <start>, <end>, <lane>) + 1 (for <pad>)
+                num_embeddings=n_bins + SPECIAL_CODE_NUM,      # 1000 + 3 (for <start>, <end>, <lane>) + 1 (for <pad>)
                 embedding_dim=hidden_size,      # 256
-                padding_idx=TOKEN_PAD,          # 0
+                padding_idx=PAD_CODE,          # 0
             ),
             nn.LayerNorm(hidden_size),
             nn.Dropout(0.1),
@@ -68,7 +68,7 @@ class Lane2Seq(pl.LightningModule):
             self.mlp_layer_list.append(nn.Linear(in_features=hidden_size, out_features=hidden_size))
             self.mlp_layer_list.append(nn.ReLU(True))
         self.mlp_layer_list.append(
-            nn.Linear(in_features=hidden_size, out_features=n_bins + SIZE_SPECIAL_TOKENS))
+            nn.Linear(in_features=hidden_size, out_features=n_bins + SPECIAL_CODE_NUM))
         
         self.mlp = nn.Sequential(*self.mlp_layer_list)
 
@@ -96,14 +96,15 @@ class Lane2Seq(pl.LightningModule):
     ) -> torch.Tensor:
         # feature extraction
         feat = self.backbone.forward_features(img)       # [b, 197, 768]
-        mem = self.bottleneck(feat)     # [b, patch_num(16), hidden_size]
+        # skip CLS token
+        mem = self.bottleneck(feat[:, 1:, :])     # [b, 196, hidden_size]
         return mem
     
 
     def forward_decoder(
         self,
         seq: torch.Tensor, # [b, seq_len]
-        mem: torch.Tensor, # [b, patch_num(16), hidden_size]
+        mem: torch.Tensor, # [b, 196, hidden_size]
         pad_mask: Optional[torch.Tensor] = None, # [b, seq_len]
     ) -> torch.Tensor:
         # embedding
@@ -132,7 +133,7 @@ class Lane2Seq(pl.LightningModule):
         # feature encode
         mem = self.forward_encoder(img) # [b, patch_num, hidden_size]
         # initial seq [b, 2] (<start>, <anchor>)
-        seq = torch.tensor([[TOKEN_START]]).repeat(batch_size, 1).to(device)
+        seq = torch.tensor([[START_CODE]]).repeat(batch_size, 1).to(device)
         # full prediction
         for _ in range(max_seq_len - 2):
             out = self.forward_decoder(seq=seq, mem=mem) # [b, seq, n_bins + k]
@@ -142,7 +143,7 @@ class Lane2Seq(pl.LightningModule):
             seq = torch.cat([seq, next_token], dim=-1)      
             # check end if batch_size is one  
             if batch_size == 1:
-                if next_token[0].item() == TOKEN_END:
+                if next_token[0].item() == END_CODE:
                     break
         return seq
     

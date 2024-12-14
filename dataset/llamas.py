@@ -12,7 +12,7 @@ from torch.utils.data import random_split
 # utils
 from utils.llamas_utils import llamas_sample_points_horizontal, llamas_extend_lane
 from utils.visualize import vis_lane_circle, vis_lane_line
-from .const import TOKEN_START, TOKEN_END, TOKEN_LANE, TOKEN_PAD
+from .const import START_CODE, END_CODE, TOKEN_LANE, PAD_CODE
 
 
 class LLAMAS(Dataset):
@@ -77,14 +77,14 @@ class LLAMAS(Dataset):
         # format_specific_sequence.insert(0, TOKEN_ANCHOR)
         
         # input sequence
-        input_sequence = [TOKEN_START]
+        input_sequence = [START_CODE]
         input_sequence.extend(format_specific_sequence)
         input_sequence = np.array(input_sequence).flatten()
         input_sequence = torch.from_numpy(input_sequence).type(torch.int64)
 
         # target sequence
         target_sequence = format_specific_sequence.copy()
-        target_sequence.append(TOKEN_END)
+        target_sequence.append(END_CODE)
         target_sequence = np.array(target_sequence).flatten()
         target_sequence = torch.from_numpy(target_sequence).type(torch.int64)
 

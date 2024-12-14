@@ -35,8 +35,8 @@ def parse_single_lane_sequence(
     lanes = []
     new_lane = []
     for _, token in enumerate(x):
-        if token == TOKEN_END: break
-        if token in [TOKEN_START, TOKEN_PAD]: continue
+        if token == END_CODE: break
+        if token in [START_CODE, PAD_CODE]: continue
         if token == TOKEN_LANE:
             lanes.append(new_lane.copy())
             new_lane.clear()
