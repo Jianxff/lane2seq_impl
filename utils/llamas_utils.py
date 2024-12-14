@@ -1,6 +1,7 @@
 from scipy.interpolate import splprep, splev
 from scipy.optimize import linear_sum_assignment
 import numpy as np
+import json
 import cv2
 
 DCOLORS = [(110, 30, 30), (75, 25, 230), (75, 180, 60), (200, 130, 0), (48, 130, 245), (180, 30, 145),
@@ -9,6 +10,7 @@ DCOLORS = [(110, 30, 30), (75, 25, 230), (75, 180, 60), (200, 130, 0), (48, 130,
            (0, 128, 128), (195, 255, 170), (75, 25, 230)]
 
 def get_dcolors(total_length):
+    # return DCOLORS[:total_length]
     center = 8
     dr = (total_length - 1) // 2
     dl = (total_length - 1) - dr
@@ -16,160 +18,8 @@ def get_dcolors(total_length):
     return colors
 
 
-def llamas_extend_lane(lane):
-    """Extends marker closest to the camera
-    Adds an extra marker that reaches the end of the image
-    Parameters
-    ----------
-    lane : iterable of markers
-    """
-    # Unfortunately, we did not store markers beyond the image plane. That hurts us now
-    # z is the orthongal distance to the car. It's good enough
-
-    # The markers are automatically detected, mapped, and labeled. There exist faulty ones,
-    # e.g., horizontal markers which need to be filtered
-    filtered_markers = filter(
-        lambda x: (x['pixel_start']['y'] != x['pixel_end']['y'] and x[
-            'pixel_start']['x'] != x['pixel_end']['x']), lane['markers'])
-    filtered_markers = list(filtered_markers)
-    if len(filtered_markers) == 0:
-        return lane
-    # might be the first marker in the list but not guaranteed
-    closest_marker = min(filtered_markers, key=lambda x: x['world_start']['z'])
-
-    if closest_marker['world_start'][
-            'z'] < 0:  # This one likely equals "if False"
-        return lane
-
-    # World marker extension approximation
-    x_gradient = (closest_marker['world_end']['x'] - closest_marker['world_start']['x']) /\
-        (closest_marker['world_end']['z'] - closest_marker['world_start']['z'])
-    y_gradient = (closest_marker['world_end']['y'] - closest_marker['world_start']['y']) /\
-        (closest_marker['world_end']['z'] - closest_marker['world_start']['z'])
-
-    zero_x = closest_marker['world_start']['x'] - (
-        closest_marker['world_start']['z'] - 1) * x_gradient
-    zero_y = closest_marker['world_start']['y'] - (
-        closest_marker['world_start']['z'] - 1) * y_gradient
-
-    # Pixel marker extension approximation
-    pixel_x_gradient = (closest_marker['pixel_end']['x'] - closest_marker['pixel_start']['x']) /\
-        (closest_marker['pixel_end']['y'] - closest_marker['pixel_start']['y'])
-    pixel_y_gradient = (closest_marker['pixel_end']['y'] - closest_marker['pixel_start']['y']) /\
-        (closest_marker['pixel_end']['x'] - closest_marker['pixel_start']['x'])
-
-    pixel_zero_x = closest_marker['pixel_start']['x'] + (
-        716 - closest_marker['pixel_start']['y']) * pixel_x_gradient
-    if pixel_zero_x < 0:
-        left_y = closest_marker['pixel_start'][
-            'y'] - closest_marker['pixel_start']['x'] * pixel_y_gradient
-        new_pixel_point = (0, left_y)
-    elif pixel_zero_x > 1276:
-        right_y = closest_marker['pixel_start']['y'] + (
-            1276 - closest_marker['pixel_start']['x']) * pixel_y_gradient
-        new_pixel_point = (1276, right_y)
-    else:
-        new_pixel_point = (pixel_zero_x, 716)
-
-    new_marker = {
-        'lane_marker_id': 'FAKE',
-        'world_end': {
-            'x': closest_marker['world_start']['x'],
-            'y': closest_marker['world_start']['y'],
-            'z': closest_marker['world_start']['z']
-        },
-        'world_start': {
-            'x': zero_x,
-            'y': zero_y,
-            'z': 1
-        },
-        'pixel_end': {
-            'x': closest_marker['pixel_start']['x'],
-            'y': closest_marker['pixel_start']['y']
-        },
-        'pixel_start': {
-            'x': int(round(new_pixel_point[0])),
-            'y': int(round(new_pixel_point[1]))
-        }
-    }
-    lane['markers'].insert(0, new_marker)
-
-    return lane
-
-
-def llamas_sample_points_horizontal(lane):
-    """ Markers are given by start and endpoint. This one adds extra points
-    which need to be considered for the interpolation. Otherwise the spline
-    could arbitrarily oscillate between start and end of the individual markers
-    Parameters
-    ----------
-    lane: polyline, in theory but there are artifacts which lead to inconsistencies
-            in ordering. There may be parallel lines. The lines may be dashed. It's messy.
-    ypp: y-pixels per point, e.g. 10 leads to a point every ten pixels
-    between_markers : bool, interpolates inbetween dashes
-    Notes
-    -----
-    Especially, adding points in the lower parts of the image (high y-values) because
-    the start and end points are too sparse.
-    Removing upper lane markers that have starting and end points mapped into the same pixel.
-    """
-
-    # Collect all x values from all markers along a given line. There may be multiple
-    # intersecting markers, i.e., multiple entries for some y values
-    x_values = [[] for i in range(717)]
-    for marker in lane['markers']:
-        x_values[marker['pixel_start']['y']].append(
-            marker['pixel_start']['x'])
-
-        height = marker['pixel_start']['y'] - marker['pixel_end']['y']
-        if height > 2:
-            slope = (marker['pixel_end']['x'] -
-                        marker['pixel_start']['x']) / height
-            step_size = (marker['pixel_start']['y'] -
-                            marker['pixel_end']['y']) / float(height)
-            for i in range(height + 1):
-                x = marker['pixel_start']['x'] + slope * step_size * i
-                y = marker['pixel_start']['y'] - step_size * i
-                x_values[int(round(y))].append(int(round(x)))
-
-    # Calculate average x values for each y value
-    for y, xs in enumerate(x_values):
-        if not xs:
-            x_values[y] = -1
-        else:
-            x_values[y] = sum(xs) / float(len(xs))
-
-    # # interpolate between markers
-    current_y = 0
-    while x_values[current_y] == -1:  # skip missing first entries
-        current_y += 1
-
-    # Also possible using numpy.interp when accounting for beginning and end
-    next_set_y = 0
-    try:
-        while current_y < 717:
-            if x_values[current_y] != -1:  # set. Nothing to be done
-                current_y += 1
-                continue
-
-            # Finds target x value for interpolation
-            while next_set_y <= current_y or x_values[next_set_y] == -1:
-                next_set_y += 1
-                if next_set_y >= 717:
-                    raise StopIteration
-
-            x_values[current_y] = x_values[current_y - 1] + (x_values[next_set_y] - x_values[current_y - 1]) /\
-                (next_set_y - current_y + 1)
-            current_y += 1
-
-    except StopIteration:
-        pass  # Done with lane
-
-    return x_values
-
-
 def remove_consecutive_duplicates(x):
-    x = sorted(x, key=lambda x: (x[0], x[1]))
+    x = sorted(x, key=lambda x: (x[1], x[0])) # sorted by y
     y = []
     for t in x:
         if len(y) > 0 and y[-1] == t:
@@ -244,3 +94,224 @@ def culane_metric(pred,
         _metric[thr] = [tp, fp, fn, tp_index]
 
     return _metric
+
+
+
+def llamas_read_json(json_path, min_lane_height=20):
+    """ Reads and cleans label file information by path"""
+    with open(json_path, 'r') as jf:
+        label_content = json.load(jf)
+
+    _filter_lanes_by_size(label_content, min_height=min_lane_height)
+    _filter_few_markers(label_content, min_markers=2)
+    _fix_lane_names(label_content)
+
+    content = {
+        # 'projection_matrix': label_content['projection_matrix'],
+        'lanes': label_content['lanes']
+    }
+
+    for lane in content['lanes']:
+        for marker in lane['markers']:
+            for pixel_key in marker['pixel_start'].keys():
+                marker['pixel_start'][pixel_key] = int(marker['pixel_start'][pixel_key])
+            for pixel_key in marker['pixel_end'].keys():
+                marker['pixel_end'][pixel_key] = int(marker['pixel_end'][pixel_key])
+            for pixel_key in marker['world_start'].keys():
+                marker['world_start'][pixel_key] = float(marker['world_start'][pixel_key])
+            for pixel_key in marker['world_end'].keys():
+                marker['world_end'][pixel_key] = float(marker['world_end'][pixel_key])
+    return content
+
+
+
+def _filter_lanes_by_size(label, min_height=40):
+    """ May need some tuning """
+    filtered_lanes = []
+    for lane in label['lanes']:
+        lane_start = min([int(marker['pixel_start']['y']) for marker in lane['markers']])
+        lane_end = max([int(marker['pixel_start']['y']) for marker in lane['markers']])
+        if (lane_end - lane_start) < min_height:
+            continue
+        filtered_lanes.append(lane)
+    label['lanes'] = filtered_lanes
+
+
+def _filter_few_markers(label, min_markers=2):
+    """Filter lines that consist of only few markers"""
+    filtered_lanes = []
+    for lane in label['lanes']:
+        if len(lane['markers']) >= min_markers:
+            filtered_lanes.append(lane)
+    label['lanes'] = filtered_lanes
+
+
+def _fix_lane_names(label):
+    """ Given keys ['l3', 'l2', 'l0', 'r0', 'r2'] returns ['l2', 'l1', 'l0', 'r0', 'r1']"""
+
+    # Create mapping
+    l_counter = 0
+    r_counter = 0
+    mapping = {}
+    lane_ids = [lane['lane_id'] for lane in label['lanes']]
+    for key in sorted(lane_ids):
+        if key[0] == 'l':
+            mapping[key] = 'l' + str(l_counter)
+            l_counter += 1
+        if key[0] == 'r':
+            mapping[key] = 'r' + str(r_counter)
+            r_counter += 1
+    for lane in label['lanes']:
+        lane['lane_id'] = mapping[lane['lane_id']]
+
+
+def llamas_extend_lane(lane):
+    """Extends marker closest to the camera
+    Adds an extra marker that reaches the end of the image
+    Parameters
+    ----------
+    lane : iterable of markers
+    """
+    # Unfortunately, we did not store markers beyond the image plane. That hurts us now
+    # z is the orthongal distance to the car. It's good enough
+
+    # The markers are automatically detected, mapped, and labeled. There exist faulty ones,
+    # e.g., horizontal markers which need to be filtered
+    filtered_markers = filter(
+        lambda x: (x['pixel_start']['y'] != x['pixel_end']['y'] and x[
+            'pixel_start']['x'] != x['pixel_end']['x']), lane['markers'])
+    filtered_markers = list(filtered_markers)
+    if len(filtered_markers) == 0:
+        return lane
+    # might be the first marker in the list but not guaranteed
+    closest_marker = min(filtered_markers, key=lambda x: x['world_start']['z'])
+
+    # if closest_marker['world_start']['z'] < 0:  # This one likely equals "if False"
+    #     return lane
+
+    # # World marker extension approximation
+    # x_gradient = (closest_marker['world_end']['x'] - closest_marker['world_start']['x']) /\
+    #     (closest_marker['world_end']['z'] - closest_marker['world_start']['z'])
+    # y_gradient = (closest_marker['world_end']['y'] - closest_marker['world_start']['y']) /\
+    #     (closest_marker['world_end']['z'] - closest_marker['world_start']['z'])
+
+    # zero_x = closest_marker['world_start']['x'] - (
+    #     closest_marker['world_start']['z'] - 1) * x_gradient
+    # zero_y = closest_marker['world_start']['y'] - (
+    #     closest_marker['world_start']['z'] - 1) * y_gradient
+
+    # Pixel marker extension approximation
+    pixel_x_gradient = (closest_marker['pixel_end']['x'] - closest_marker['pixel_start']['x']) /\
+        (closest_marker['pixel_end']['y'] - closest_marker['pixel_start']['y'])
+    pixel_y_gradient = (closest_marker['pixel_end']['y'] - closest_marker['pixel_start']['y']) /\
+        (closest_marker['pixel_end']['x'] - closest_marker['pixel_start']['x'])
+
+    pixel_zero_x = closest_marker['pixel_start']['x'] + (
+        716 - closest_marker['pixel_start']['y']) * pixel_x_gradient
+    if pixel_zero_x < 0:
+        left_y = closest_marker['pixel_start'][
+            'y'] - closest_marker['pixel_start']['x'] * pixel_y_gradient
+        new_pixel_point = (0, left_y)
+    elif pixel_zero_x > 1276:
+        right_y = closest_marker['pixel_start']['y'] + (
+            1276 - closest_marker['pixel_start']['x']) * pixel_y_gradient
+        new_pixel_point = (1276, right_y)
+    else:
+        new_pixel_point = (pixel_zero_x, 716)
+
+    new_marker = {
+        'lane_marker_id': 'FAKE',
+        # 'world_end': {
+        #     'x': closest_marker['world_start']['x'],
+        #     'y': closest_marker['world_start']['y'],
+        #     'z': closest_marker['world_start']['z']
+        # },
+        # 'world_start': {
+        #     'x': zero_x,
+        #     'y': zero_y,
+        #     'z': 1
+        # },
+        'pixel_end': {
+            'x': closest_marker['pixel_start']['x'],
+            'y': closest_marker['pixel_start']['y']
+        },
+        'pixel_start': {
+            'x': int(round(new_pixel_point[0])),
+            'y': int(round(new_pixel_point[1]))
+        }
+    }
+    lane['markers'].insert(0, new_marker)
+
+    return lane
+
+
+# def llamas_sample_points_horizontal(lane):
+#     """ Markers are given by start and endpoint. This one adds extra points
+#     which need to be considered for the interpolation. Otherwise the spline
+#     could arbitrarily oscillate between start and end of the individual markers
+#     Parameters
+#     ----------
+#     lane: polyline, in theory but there are artifacts which lead to inconsistencies
+#             in ordering. There may be parallel lines. The lines may be dashed. It's messy.
+#     ypp: y-pixels per point, e.g. 10 leads to a point every ten pixels
+#     between_markers : bool, interpolates inbetween dashes
+#     Notes
+#     -----
+#     Especially, adding points in the lower parts of the image (high y-values) because
+#     the start and end points are too sparse.
+#     Removing upper lane markers that have starting and end points mapped into the same pixel.
+#     """
+
+#     # Collect all x values from all markers along a given line. There may be multiple
+#     # intersecting markers, i.e., multiple entries for some y values
+#     x_values = [[] for i in range(717)]
+#     for marker in lane['markers']:
+#         x_values[marker['pixel_start']['y']].append(
+#             marker['pixel_start']['x'])
+
+#         height = marker['pixel_start']['y'] - marker['pixel_end']['y']
+#         if height > 2:
+#             slope = (marker['pixel_end']['x'] -
+#                         marker['pixel_start']['x']) / height
+#             step_size = (marker['pixel_start']['y'] -
+#                             marker['pixel_end']['y']) / float(height)
+#             for i in range(height + 1):
+#                 x = marker['pixel_start']['x'] + slope * step_size * i
+#                 y = marker['pixel_start']['y'] - step_size * i
+#                 x_values[int(round(y))].append(int(round(x)))
+
+#     # Calculate average x values for each y value
+#     for y, xs in enumerate(x_values):
+#         if not xs:
+#             x_values[y] = -1
+#         else:
+#             x_values[y] = sum(xs) / float(len(xs))
+
+#     # # interpolate between markers
+#     current_y = 0
+#     while x_values[current_y] == -1:  # skip missing first entries
+#         current_y += 1
+
+#     # Also possible using numpy.interp when accounting for beginning and end
+#     next_set_y = 0
+#     try:
+#         while current_y < 717:
+#             if x_values[current_y] != -1:  # set. Nothing to be done
+#                 current_y += 1
+#                 continue
+
+#             # Finds target x value for interpolation
+#             while next_set_y <= current_y or x_values[next_set_y] == -1:
+#                 next_set_y += 1
+#                 if next_set_y >= 717:
+#                     raise StopIteration
+
+#             x_values[current_y] = x_values[current_y - 1] + (x_values[next_set_y] - x_values[current_y - 1]) /\
+#                 (next_set_y - current_y + 1)
+#             current_y += 1
+
+#     except StopIteration:
+#         pass  # Done with lane
+
+#     return x_values
+

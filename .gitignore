@@ -7,6 +7,8 @@ logs/
 .cache
 .test
 .vscode
+*.old
+temp/
 # checkpoint
 checkpoints/
 *.ckpt

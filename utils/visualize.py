@@ -6,8 +6,9 @@ import numpy as np
 import torch
 import cv2
 # utils
-from .metric import parse_single_lane_sequence
+from .metric import parse_single_lane_sequence, interpolate_lane
 from utils.llamas_utils import get_dcolors
+
 
 def image_torch_to_numpy(x: torch.Tensor):
     if x.size(0) == 3:
@@ -15,7 +16,7 @@ def image_torch_to_numpy(x: torch.Tensor):
     return x.detach().cpu().numpy()
 
 
-def vis_lane_circle(
+def visualize_markers(
     image: Union[np.ndarray, torch.Tensor],
     lane: torch.Tensor,
 ) -> np.ndarray:
@@ -25,6 +26,7 @@ def vis_lane_circle(
     img_size = image.shape[:2]
     # parse lanes
     lanes = parse_single_lane_sequence(lane, img_size=img_size)
+
     # gather all markers
     colors = get_dcolors(len(lanes))
     # draw markers
@@ -34,7 +36,7 @@ def vis_lane_circle(
     return image
 
 
-def vis_lane_line(
+def visualize_interp_lines(
     image: Union[np.ndarray, torch.Tensor],
     lane: Union[List[int], torch.Tensor],
 ) -> np.ndarray:
@@ -44,10 +46,14 @@ def vis_lane_line(
     img_size = image.shape[:2]
     # parse lanes
     lanes = parse_single_lane_sequence(lane, img_size=img_size)
+    lanes = [interpolate_lane(lane).tolist() for lane in lanes]
+
     # gather all colors
     colors = get_dcolors(len(lanes))
     # draw lines
     for i, lane in enumerate(lanes):
         for p1, p2 in zip(lane[:-1], lane[1:]):
-            cv2.line(image, p1, p2, color=colors[i], thickness=10)
+            p1 = tuple(map(int, p1))
+            p2 = tuple(map(int, p2))
+            cv2.line(image, p1, p2, color=colors[i], thickness=6)
     return image

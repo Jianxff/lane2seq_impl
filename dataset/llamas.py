@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Union, Optional, List, Dict, Tuple
 # third party
-import json
+from scipy.interpolate import UnivariateSpline, interp1d
 import numpy as np
 import cv2
 import torch
@@ -10,9 +10,9 @@ from torch.utils.data import Dataset
 import lightning as pl
 from torch.utils.data import random_split
 # utils
-from utils.llamas_utils import llamas_sample_points_horizontal, llamas_extend_lane
-from utils.visualize import vis_lane_circle, vis_lane_line
-from .const import START_CODE, END_CODE, TOKEN_LANE, PAD_CODE
+from utils.llamas_utils import llamas_read_json, llamas_extend_lane
+from utils.visualize import visualize_interp_lines, visualize_markers
+from .const import START_CODE, END_CODE, LANE_CODE, PAD_CODE
 
 
 class LLAMAS(Dataset):
@@ -66,13 +66,13 @@ class LLAMAS(Dataset):
         
         # load label
         format_specific_sequence = []
-        lanes_markers = self.load_json(self.labels[idx], (H, W))
+        lanes_markers = self.load_markers(self.labels[idx])
         for i, markers in enumerate(lanes_markers):
             markers:list = np.array(markers).flatten().tolist() # [x1, y1, x2, y2, ...], 14 points
             # if i == 0: 
             #     markers.insert(0, 0); markers.insert(0, 0)
             markers = self.quantize_points(markers, (H, W))     # quantize points to [1, 1000]
-            markers.append(TOKEN_LANE)
+            markers.append(LANE_CODE)
             format_specific_sequence.extend(markers)
         # format_specific_sequence.insert(0, TOKEN_ANCHOR)
         
@@ -141,7 +141,7 @@ class LLAMAS(Dataset):
         return image
 
 
-    def load_json(self, path: Path, image_size: Tuple[int, int]) -> List[int]:
+    def load_markers(self, path: Path) -> List[int]:
         """
         Load label from the given path.
         Args:
@@ -149,35 +149,52 @@ class LLAMAS(Dataset):
         Returns:
             List[str]: list of label strings
         """
-        H, W = image_size[:2]
-        with open(path) as f:
-            json_data_raw = json.load(f)
-        
-        lanes = []
-        for lane in json_data_raw['lanes']:
-            lane = self.convert_str_single_lane(lane)
-            lane = llamas_extend_lane(lane)
-            x_points = llamas_sample_points_horizontal(lane)
-            points = [(x, y) for x, y in zip(x_points, range(H)) if x >= 0]
-            if len(points) >= 14:
-                # randomly sample 14 points
-                points = [points[i] for i in range(0, len(points), len(points) // 14)]
-                lanes.append(points)
+        lanes_raw = llamas_read_json(path, min_lane_height=20)['lanes']
 
-        return lanes
+        lanes_markers = []
+        for lane in lanes_raw:
+            # extend lane
+            lane = llamas_extend_lane(lane)
+            # to list of points
+            lane = self.marker_dict_to_lists(lane)
+            # uniform sample points
+            lanes_markers.append(self.sample_points(lane, 14))
+
+        return lanes_markers
+    
 
     @staticmethod
-    def convert_str_single_lane(lane):
-        keys_to_float = ['world_start', 'world_end']
-        keys_to_int = ['pixel_start', 'pixel_end']
-        for marker in lane['markers']:
-            for key in keys_to_float:
-                if key in marker:
-                    marker[key] = {k: float(v) for k, v in marker[key].items()}
-            for key in keys_to_int:
-                if key in marker:
-                    marker[key] = {k: int(v) for k, v in marker[key].items()}
-        return lane
+    def marker_dict_to_lists(lane: Dict) -> List[Tuple[int, int]]:
+        """Convert single lane to list of points
+        Args:
+            lanes (json): lane markers 
+        Returns:
+            list: list of points
+        """
+        markers = lane['markers']
+        points = []
+        for marker in markers:
+            points.append((int(marker['pixel_start']['x']), int(marker['pixel_start']['y'])))
+            points.append((int(marker['pixel_end']['x']), int(marker['pixel_end']['y'])))
+        return points
+    
+
+    @staticmethod
+    def sample_points(points: List[Tuple[int, int]], num_points: int) -> List[Tuple[int, int]]:
+        """Sample points from list of points
+        Args:
+            points (list): list of points
+            num_points (int): number of points to sample
+        Returns:
+            list: list of sampled points
+        """
+        x, y = zip(*points)
+        f = interp1d(y, x, kind='linear')
+        y_new = np.linspace(min(y), max(y), num_points)
+        x_new = f(y_new)
+
+        return [(int(x), int(y)) for x, y in zip(x_new, y_new)]
+
 
 
 def collate_fn(batch: torch.Tensor):
@@ -277,10 +294,10 @@ class LLAMASModule(pl.LightningDataModule):
         )
 
 
-if __name__ == '__main__':
-    dataset = LLAMAS('/data/datasets/LLAMAS', 'valid')
-    print(len(dataset))
-    print(dataset.images[150])
-    image, input_sequence, target_sequence = dataset[150]
-    img = vis_lane_line(image, target_sequence)
-    cv2.imwrite('test.png', img)
+# if __name__ == '__main__':
+#     dataset = LLAMAS('/data/datasets/LLAMAS', 'valid')
+#     print(len(dataset))
+#     print(dataset.images[150])
+#     image, input_sequence, target_sequence = dataset[150]
+#     img = visualize_interp_lines(image, target_sequence)
+#     cv2.imwrite('test.png', img)

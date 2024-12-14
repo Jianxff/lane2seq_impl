@@ -37,7 +37,7 @@ def parse_single_lane_sequence(
     for _, token in enumerate(x):
         if token == END_CODE: break
         if token in [START_CODE, PAD_CODE]: continue
-        if token == TOKEN_LANE:
+        if token == LANE_CODE:
             lanes.append(new_lane.copy())
             new_lane.clear()
         else:
@@ -80,14 +80,14 @@ def batch_evaluate(
     x: torch.Tensor,    # [b, seq]
     gt: torch.Tensor,   # [b, seq]
     img_size: Tuple[int, int] = (717, 1276)
-) -> float:
+) -> Dict:
     """
     Evaluate the model.
     Args:
         x (torch.Tensor): predicted sequences [b, seq]
         gt (torch.Tensor): ground truth sequences [b, seq]
     Returns:
-        float: metric
+        Dict: metric
     """
     metrics = batch_fn(evaluate_single_batch, x.size(0), \
                        x, gt, img_size=img_size)

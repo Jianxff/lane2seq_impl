@@ -25,7 +25,7 @@ def main(args):
         model.load_state_dict(torch.load(args.ckpt)['state_dict'])
 
     # logger
-    logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS-Tuning', log_graph=True)
+    logger = TensorBoardLogger(save_dir='./logs',name='Lane2Seq-LLAMAS-Tune', log_graph=True)
 
     # checkpoints
     checkpoint_callback = ModelCheckpoint(
