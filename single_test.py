@@ -30,7 +30,7 @@ def main(args):
 
     # draw GT and predict
     img_raw = cv2.resize(image[0].permute(1, 2, 0).detach().cpu().numpy(), dsize=(1276, 717))
-    img_gt = visualize_interp_lines(image[0], gt_seq)
+    img_gt = visualize_markers(image[0], gt_seq)
     img_pred = visualize_markers(image[0], pred_seq[0])
 
     # metric
@@ -45,6 +45,8 @@ def main(args):
     else:
         raise ValueError(f'Invalid mode: {args.mode}')
 
+    if args.out is None:
+        args.out = f'./predict_{data_idx:05d}.png'
     cv2.imwrite(args.out, img)
 
 
@@ -52,7 +54,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--llamas_root', type=str, required=True)
     parser.add_argument('--idx', type=int, default=0)
-    parser.add_argument('--out', type=str, default='./result.png')
+    parser.add_argument('--out', type=str, default=None)
     parser.add_argument('--ckpt', type=str, default='./checkpoints/tune/last.ckpt')
     parser.add_argument('--mode', type=str, default='h')
     args = parser.parse_args()

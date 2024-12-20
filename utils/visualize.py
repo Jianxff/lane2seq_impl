@@ -32,7 +32,7 @@ def visualize_markers(
     # draw markers
     for i, lane in enumerate(lanes):
         for x, y in lane:
-            cv2.circle(image, (x, y), radius=6, color=colors[i], thickness=-1)
+            cv2.circle(image, (x, y), radius=10, color=colors[i], thickness=-1)
     return image
 
 
